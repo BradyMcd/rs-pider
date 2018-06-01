@@ -1,0 +1,9 @@
+[package]
+name = "rs-pider"
+version = "0.1.0"
+authors = ["Brady McDonough"]
+
+[dependencies]
+reqwest="0.8.6"
+robotparser={ version = "0.10.1", features = ["http"] }
+url="1.7.0"
