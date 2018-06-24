@@ -1,17 +1,12 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
 
 extern crate robotparser;
 extern crate url;
 extern crate reqwest;
+extern crate xml;
+extern crate chrono;
+extern crate sitemap;
 
-use url::Url;
+pub use url::Url;
 
+pub mod mapper;
 
-
-pub mod sitemap;

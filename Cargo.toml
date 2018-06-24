@@ -7,3 +7,6 @@ authors = ["Brady McDonough"]
 reqwest="0.8.6"
 robotparser={ version = "0.10.1", features = ["http"] }
 url="1.7.0"
+xml-rs="0.8.0"
+chrono="0.4"
+sitemap="0.2.0"
