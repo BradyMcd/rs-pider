@@ -1,0 +1,5 @@
+
+First, write tests
+Second, change the code layout. Fetching from a sitemap should be done on demand rather than all at
+once on initialization, this might change the interface slightly since we basically become an iterator
+Maybe write tests with that in mind? This means I'm not first writing tests though.
