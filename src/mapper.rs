@@ -1,25 +1,32 @@
 
-use std::io::Read;
+//use std::io::Read;
+
+extern crate xml;
 
 use url::{ Url, ParseError };
 use reqwest::{ Client, Error as ReqwestError };
 use robotparser::RobotFileParser;
 use sitemap::reader::{SiteMapReader, SiteMapEntity};
 use sitemap::structs::{SiteMapEntry, UrlEntry};
+use xml::reader::{Error as XmlError};
 
 #[derive( Debug )]
-enum MapperError {
+pub enum MapperError {
     InvalidHost,
     NoDomain,
-    PartialMapFetchError( ( Vec<ReqwestError>, Vec<UrlEntry> ) ),
     ConnectionError( ReqwestError ),
     ParseError( ParseError ),
+    XmlError( XmlError ),
 }
 
+struct PartialMapFetchError{
+    errors: Vec<MapperError>,
+    urls: Vec<UrlEntry>,
+}
 
-struct Mapper {
+pub struct Mapper {
     pub sites:Vec<UrlEntry>,
-    fetch_fails: Vec<ReqwestError>,
+    fetch_fails: Vec<MapperError>,
 }
 
 //Exposing the internal iterator must consume the Mapper, maybe allow as a convenience a way to go back
@@ -31,28 +38,28 @@ impl Mapper {
     /*TODO: since we may be getting a url from an untrusted source sanitizing it is potentially
      * important in a number of scenarios, it should probably be moved to a util module if and when it
      * becomes useful. */
-    fn to_base_url( url:Url ) -> Result< Url, MapperError >{
+    fn to_base_url( mut url:Url ) -> Result< Url, MapperError >{
         if url.cannot_be_a_base( ) {
             return Err( MapperError::InvalidHost );
         }
-        url.set_scheme( "https" );
+        url.set_scheme( "https" ).expect( "The Impossible happened" );
         url.set_path( "" );
-        url.set_port( None );
+        url.set_port( None ).expect( "The Impossible happened" );
         url.set_query( None );
         url.set_fragment( None );
-        url.set_username( "" );
-        url.set_password( None );
+        url.set_username( "" ).expect( "The Impossible happened" );
+        url.set_password( None ).expect( "The Impossible happened" );
         Ok( url )
     }
 
-    fn guess_robots( url:Url ) -> Result< Url, MapperError > {
+    fn guess_robots( url:&Url ) -> Result< Url, MapperError > {
         match url.join( "robots.txt" ) {
             Ok( u ) => return Ok( u ),
             Err( e ) => return Err( MapperError::ParseError( e ) ), /* in principle this never happens?
             We've already tested the error which would cause this in to_base_url() */
         }
     }
-    fn guess_sitemap( url:Url ) -> Result< Url, MapperError > {
+    fn guess_sitemap( url:&Url ) -> Result< Url, MapperError > {
         match url.join( "sitemap.xml" ){
             Ok( u ) => return Ok( u ),
             Err( e ) => return Err( MapperError::ParseError( e ) ),
@@ -61,27 +68,29 @@ impl Mapper {
 
     /* NOTE: Is maybe jank, there probably is a better way than using a function parameter here to
      * convert to a Url */
-    fn sitemap_descend <T> ( client:Client, maps:Vec<T>, url_from:fn( T ) -> Url )
-                        -> Result< Vec<UrlEntry>, MapperError > {
-        let ret = Vec::new( );
-        let err_accum = Vec::new( );
-        let submaps = Vec::new( );
+    fn sitemap_descend <T> ( client:Client, mut maps: Vec<T>, url_from:fn( T ) -> Url )
+                        -> Result< Vec<UrlEntry>, PartialMapFetchError > {
+        let mut ret = Vec::new( );
+        let mut err_accum = Vec::new( );
+        let mut submaps = Vec::new( );
 
-        for map in maps.iter( ) {
-            match client.get( url_from( *map ) ).send( ) {
-                Ok( r ) => {
-                    let tokens = SiteMapReader::new( r.text( )
-                                                     .unwrap( )
-                                                     .as_bytes( ) );
-                    for event in tokens {
-                        match event {
-                            SiteMapEntity::Url( u ) => ret.push( u ),
-                            SiteMapEntity::SiteMap( s ) => submaps.push( s ),
-                        }
-                    }
+        for map in maps.drain( .. ) {
+            match client.get( url_from( map ) ).send( ) {
+                Ok( mut r ) => {
+                    //TODO: LIFETIMES
+                    SiteMapReader::new( r.text( )
+                                        .unwrap( )
+                                        .as_bytes( ) ).
+                        for_each( |event| {
+                            match event {
+                                SiteMapEntity::Url( u ) => ret.push( u ),
+                                SiteMapEntity::SiteMap( s ) => submaps.push( s ),
+                                SiteMapEntity::Err( e ) => err_accum.push( MapperError::XmlError( e ) )
+                            }
+                        } );
                 }
                 Err( e ) => {
-                    err_accum.push( e );
+                    err_accum.push( MapperError::ConnectionError( e ) );
                 }
             }
         };
@@ -90,10 +99,9 @@ impl Mapper {
             match Mapper::sitemap_descend( client, submaps,
                                            |entry:SiteMapEntry|{ entry.loc.get_url().unwrap()} ) {
                 Ok( urls ) => ret.extend( urls.iter( ).cloned( ) ),
-                Err( MapperError::PartialMapFetchError( inner ) ) => {
-                    let ( errs, urls ) = inner;
-                    ret.extend( urls.iter( ).cloned( ) );
-                    errs.iter( ).for_each( |e| { err_accum.push( *e ) } );
+                Err( mut partials ) => {
+                    ret.extend( partials.urls.iter( ).cloned( ) );
+                    partials.errors.drain( .. ).for_each( |e| { err_accum.push( e ) } );
                 }
             };
         }
@@ -101,16 +109,16 @@ impl Mapper {
         if err_accum.is_empty( ) {
             Ok( ret )
         } else {
-            Err( MapperError::PartialMapFetchError( ( err_accum, ret ) ) )
+            Err( PartialMapFetchError{ urls: ret, errors:err_accum } )
         }
     }
 
-    fn new( url:Url, client:Client ) -> Result< Mapper, MapperError > {
+    pub fn new( url:Url, client:Client ) -> Result< Mapper, MapperError > {
         let host = Mapper::to_base_url( url )?;
-        let robots_url = Mapper::guess_robots( host )?;
+        let robots_url = Mapper::guess_robots( &host )?;
 
-        let mut sitemap_urls:Vec<Url> = match client.get( robots_url ).send( ) {
-            Ok( r ) => {
+        let sitemap_urls:Vec<Url> = match client.get( robots_url.clone( ) ).send( ) {
+            Ok( mut r ) => {
                 let t = RobotFileParser::new( robots_url );
                 t.from_response( &mut r );
                 t.get_sitemaps( "rs_pider" ) //TODO: The agent string needs to be configurable
@@ -119,17 +127,16 @@ impl Mapper {
                 /* e is some form of connection error most probably
                 I need to figure out how I want to deal with those and then fall back to guessing
                 sitemap */
-                vec![Mapper::guess_sitemap( host )?]
+                vec![Mapper::guess_sitemap( &host )?]
             }
         };
 
         match Mapper::sitemap_descend( client, sitemap_urls, |u|{u} ) {
             Ok( urls ) => { Ok( Mapper{ sites:urls, fetch_fails:vec![] } ) }
-            Err( MapperError::PartialMapFetchError(inner) ) => {
-                let (errs, urls) = inner;
-                Ok( Mapper{ sites:urls, fetch_fails:errs } )
+            Err( partials ) => {
+                Ok( Mapper{ sites:partials.urls, fetch_fails:partials.errors } )
             }
         }
     }
 }
-//TODO:Nonexhaustive patterns!
+
