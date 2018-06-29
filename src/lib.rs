@@ -8,5 +8,6 @@ extern crate sitemap;
 
 pub use url::Url;
 
+pub mod util;
 pub mod mapper;
 

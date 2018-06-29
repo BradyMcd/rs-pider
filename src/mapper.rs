@@ -1,5 +1,6 @@
 
-//use std::io::Read;
+//TODO: Make the Mapper struct into an interface to two iterators. Will need to wrap both, one an error iterator and the other a urlentry iterator, probably should include accessors for UrlEntry in this scope rather than have the user responsible for them.
+
 
 extern crate xml;
 
@@ -9,6 +10,8 @@ use robotparser::RobotFileParser;
 use sitemap::reader::{SiteMapReader, SiteMapEntity};
 use sitemap::structs::{SiteMapEntry, UrlEntry};
 use xml::reader::{Error as XmlError};
+
+use util::to_base_url;
 
 #[derive( Debug )]
 pub enum MapperError {
@@ -25,7 +28,7 @@ struct PartialMapFetchError{
 }
 
 pub struct Mapper {
-    pub sites:Vec<UrlEntry>,
+    sites:Vec<UrlEntry>,
     fetch_fails: Vec<MapperError>,
 }
 
@@ -34,22 +37,30 @@ pub struct Mapper {
 //This is going to take a while, look at parallelization options
 impl Mapper {
 
-    ///takes a url and ensures it is in the form https://foo.bar/ and is a valid host
-    /*TODO: since we may be getting a url from an untrusted source sanitizing it is potentially
-     * important in a number of scenarios, it should probably be moved to a util module if and when it
-     * becomes useful. */
-    fn to_base_url( mut url:Url ) -> Result< Url, MapperError >{
-        if url.cannot_be_a_base( ) {
-            return Err( MapperError::InvalidHost );
+    pub fn new( url:Url, client:Client ) -> Result< Mapper, MapperError > {
+        let host = to_base_url( url )?;
+        let robots_url = Mapper::guess_robots( &host )?;
+
+        let sitemap_urls:Vec<Url> = match client.get( robots_url.clone( ) ).send( ) {
+            Ok( mut r ) => {
+                let t = RobotFileParser::new( robots_url );
+                t.from_response( &mut r );
+                t.get_sitemaps( "rs_pider" ) //TODO: The agent string needs to be configurable
+            }
+            Err( _e ) => {
+                /* e is some form of connection error most probably
+                I need to figure out how I want to deal with those and then fall back to guessing
+                sitemap */
+                vec![Mapper::guess_sitemap( &host )?]
+            }
+        };
+
+        match Mapper::sitemap_descend( client, sitemap_urls, |u|{u} ) {
+            Ok( urls ) => { Ok( Mapper{ sites:urls, fetch_fails:vec![] } ) }
+            Err( partials ) => {
+                Ok( Mapper{ sites:partials.urls, fetch_fails:partials.errors } )
+            }
         }
-        url.set_scheme( "https" ).expect( "The Impossible happened" );
-        url.set_path( "" );
-        url.set_port( None ).expect( "The Impossible happened" );
-        url.set_query( None );
-        url.set_fragment( None );
-        url.set_username( "" ).expect( "The Impossible happened" );
-        url.set_password( None ).expect( "The Impossible happened" );
-        Ok( url )
     }
 
     fn guess_robots( url:&Url ) -> Result< Url, MapperError > {
@@ -113,30 +124,6 @@ impl Mapper {
         }
     }
 
-    pub fn new( url:Url, client:Client ) -> Result< Mapper, MapperError > {
-        let host = Mapper::to_base_url( url )?;
-        let robots_url = Mapper::guess_robots( &host )?;
 
-        let sitemap_urls:Vec<Url> = match client.get( robots_url.clone( ) ).send( ) {
-            Ok( mut r ) => {
-                let t = RobotFileParser::new( robots_url );
-                t.from_response( &mut r );
-                t.get_sitemaps( "rs_pider" ) //TODO: The agent string needs to be configurable
-            }
-            Err( _e ) => {
-                /* e is some form of connection error most probably
-                I need to figure out how I want to deal with those and then fall back to guessing
-                sitemap */
-                vec![Mapper::guess_sitemap( &host )?]
-            }
-        };
-
-        match Mapper::sitemap_descend( client, sitemap_urls, |u|{u} ) {
-            Ok( urls ) => { Ok( Mapper{ sites:urls, fetch_fails:vec![] } ) }
-            Err( partials ) => {
-                Ok( Mapper{ sites:partials.urls, fetch_fails:partials.errors } )
-            }
-        }
-    }
 }
 
