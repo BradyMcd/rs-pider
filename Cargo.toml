@@ -4,9 +4,10 @@ version = "0.1.0"
 authors = ["Brady McDonough"]
 
 [dependencies]
-reqwest = "0.8.6"
-robotparser = { version = "0.10.1", features = [ "http" ] }
+reqwest = "^0.9"
+robotparser = { version = "0.10.2", features = [ "http" ] }
 url = "1.7.0"
 ##xml-rs = "0.8.0"
 sitemap = "0.3.0"
 base_url = { version = "^0.0.8", features = [ "sitemap_conversion", "robot_conversion" ] }
+try_from = "0.2.2"
