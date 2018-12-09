@@ -1,4 +1,5 @@
 //
+// :81 :83
 
 use std::collections::VecDeque;
 use std::iter::FromIterator;
@@ -24,6 +25,7 @@ struct MapsList {
 }
 
 
+//TODO: Since this is two collections having a full new section and even one element in the stale section for example could make bad things happen.
 impl MapsList {
 
     fn new(  ) -> MapsList {
@@ -56,6 +58,11 @@ impl MapsList {
         self.new.pop_front( )
     }
 
+    //TODO: Split this
+    fn len( &self ) -> usize {
+        self.new.len( )
+    }
+
     fn merge_stale( &mut self ) {
         self.new.append( &mut self.stale );
     }
@@ -68,8 +75,7 @@ impl MapsList {
         self.stale.extend( s );
     }
 }
-
-impl< T:Into<SiteMapEntry> > FromIterator< T > for MapsList {
+impl< T: Into< SiteMapEntry > > FromIterator< T > for MapsList {
     fn from_iter< I:IntoIterator< Item=T > >( iter:I ) -> Self {
         let mut ret = MapsList::new( );
 
@@ -268,10 +274,10 @@ impl< 'r > SiteMeta< 'r > {
             }
         };
 
-        known_maps = robots_txt.get_sitemaps( "useragent" )
+        known_maps = robots_txt.get_sitemaps( "you're cute!" )
             .into_iter( )
             .collect( );
-
+        println!( "{:?}", robots_txt );
         Ok( SiteMeta {
             client: client,
             known_maps: known_maps,
