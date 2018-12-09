@@ -4,12 +4,13 @@
 use std::collections::VecDeque;
 use std::iter::FromIterator;
 
+use rs_pider_robots::RobotsParser;
+
+use base_url::BaseUrl;
 use try_from::TryFrom;
 
 use sitemap::structs::{ SiteMapEntry, Location };
 use sitemap::reader::{ SiteMapReader, SiteMapEntity };
-use robotparser::RobotFileParser;
-use base_url::BaseUrl;
 use url::Url;
 
 use reqwest::{Client, Response, Error as ReqwestError};
@@ -96,12 +97,12 @@ fn guess_robots( url:&BaseUrl ) -> BaseUrl {
  * Public
  */
 
-pub struct SiteMeta< 'r > {
+pub struct SiteMeta {
     client: Client,
     //I think I need two barriers in this Deque, one for retry failures and one for timing
     known_maps: MapsList,
     curr_map: Option< ( SiteMapReader< Response >, SiteMapEntry ) >,
-    robots: RobotFileParser< 'r >,
+    robots: RobotsParser,
     base_url: BaseUrl,
 }
 
@@ -111,7 +112,7 @@ fn guess_sitemap( url: &BaseUrl ) -> BaseUrl {
     return ret;
 }
 
-impl< 'r > SiteMeta< 'r > {
+impl SiteMeta {
 
     /// Only called internally, ```populate_known()``` first checks if there are any known maps. If
     /// there are none it makes the idiomatic guess that a sitemap.xml is placed at the root of the
@@ -232,7 +233,7 @@ impl< 'r > SiteMeta< 'r > {
     }
 }
 
-impl< 'r > Iterator for SiteMeta< 'r > {
+impl Iterator for SiteMeta {
     type Item = BaseUrl;
     fn next( &mut self ) -> Option< Self::Item > {
         let mut ret: Option< Self::Item >;
@@ -250,34 +251,32 @@ impl< 'r > Iterator for SiteMeta< 'r > {
     }
 }
 
-impl< 'r > SiteMeta< 'r > {
+impl SiteMeta {
 
     /// Builds a SiteMeta structure from a BaseUrl pointing to a robots.txt file on a server somewhere.
     ///
     /// # Errors:
     /// If an error occurs trying to fetch the robots.txt file it is returned instead. See
     /// [Link](https://docs.rs/reqwest/0.8.6/reqwest/struct.Error.html) for more.
-    pub fn from_robots_url( robots_url:&BaseUrl ) -> Result< ( SiteMeta< 'r > ), ReqwestError > {
+    pub fn from_robots_url( robots_url:&BaseUrl ) -> Result< ( SiteMeta ), ReqwestError > {
         let client = Client::new( ); //TODO: add client setup
         let response = client.get::< Url >( robots_url.clone( ).into( ) ).send( );
-        let robots_txt: RobotFileParser< 'r > = RobotFileParser::< 'r >::from( robots_url.clone( ) );
+        let robots_txt;
         let known_maps: MapsList;
         let mut host = robots_url.clone( );
         host.set_path( "/" );
 
         match response{
-            Ok( mut r ) => {
-                robots_txt.from_response( &mut r );
+            Ok( r ) => {
+                robots_txt = RobotsParser::from_response( r );
             }
             Err( e ) => {
                 return Err( e );
             }
         };
 
-        known_maps = robots_txt.get_sitemaps( "you're cute!" )
-            .into_iter( )
-            .collect( );
-        println!( "{:?}", robots_txt );
+        known_maps = robots_txt.get_sitemaps( ).into_iter( ).collect( );
+
         Ok( SiteMeta {
             client: client,
             known_maps: known_maps,
@@ -293,7 +292,7 @@ impl< 'r > SiteMeta< 'r > {
     /// # Errors:
     /// If an error occurs trying to fetch the robots.txt file it is returned instead. See
     /// [Link](https://docs.rs/reqwest/0.8.6/reqwest/struct.Error.html) for more
-    pub fn from_url( url:&BaseUrl ) -> Result< ( SiteMeta< 'r > ), ReqwestError > {
+    pub fn from_url( url:&BaseUrl ) -> Result< ( SiteMeta ), ReqwestError > {
         Self::from_robots_url( &guess_robots( url ) )
     }
 

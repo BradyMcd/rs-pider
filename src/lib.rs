@@ -1,5 +1,5 @@
 
-extern crate robotparser;
+extern crate rs_pider_robots;
 extern crate url;
 extern crate reqwest;
 extern crate sitemap;

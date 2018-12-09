@@ -10,10 +10,10 @@ url = "1.7.0"
 sitemap = "0.3.0"
 try_from = "0.2.2"
 
-[dependencies.rs-pider-robots]
+[dependencies.rs_pider_robots]
 path="../rs-pider-robots/"
 version = "0.1.0"
 
 [dependencies.base_url]
 version = "^0.0.8"
-features = [ "sitemap_conversion", "robot_conversion" ]
+features = [ "sitemap_conversion" ]
