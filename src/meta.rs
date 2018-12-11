@@ -7,7 +7,7 @@ use std::iter::FromIterator;
 use rs_pider_robots::RobotsParser;
 
 use base_url::BaseUrl;
-use try_from::TryFrom;
+use base_url::TryFrom;
 
 use sitemap::structs::{ SiteMapEntry, Location };
 use sitemap::reader::{ SiteMapReader, SiteMapEntity };
