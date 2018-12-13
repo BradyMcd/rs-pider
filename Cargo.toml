@@ -15,3 +15,4 @@ version = "0.1.0"
 [dependencies.base_url]
 version = "^0.0.10"
 features = [ "sitemap_conversion" ]
+
