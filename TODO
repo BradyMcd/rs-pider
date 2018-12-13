@@ -3,3 +3,9 @@ First, write tests
 Second, change the code layout. Fetching from a sitemap should be done on demand rather than all at
 once on initialization, this might change the interface slightly since we basically become an iterator
 Maybe write tests with that in mind? This means I'm not first writing tests though.
+
+The problem as I see it is implementing a sitemap.xml parser with long running spider development in
+mind. I almost definitely want to store the sitemap entries I find on the structure's end and have a
+convenience re-check function. That can't be implemented as an iterator which is probably fine. The
+issue might be that the iterator over UrlEntries would need a Reqwest::Client and I want that entirely
+from the user. That means 2 calls to ::new() on the user end which I would rather not have.

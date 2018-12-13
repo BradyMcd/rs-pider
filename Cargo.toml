@@ -1,12 +1,18 @@
 [package]
-name = "rs-pider"
+name = "rs_pider"
 version = "0.1.0"
 authors = ["Brady McDonough"]
 
 [dependencies]
-reqwest="0.8.6"
-robotparser={ version = "0.10.1", features = ["http"] }
-url="1.7.0"
-xml-rs="0.8.0"
-chrono="0.4"
-sitemap="0.2.0"
+reqwest = "^0.9"
+url = "1.7.0"
+sitemap = "0.3.0"
+
+[dependencies.rs_pider_robots]
+path="../rs-pider-robots/"
+version = "0.1.0"
+
+[dependencies.base_url]
+version = "^0.0.10"
+features = [ "sitemap_conversion" ]
+
