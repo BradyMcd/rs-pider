@@ -17,8 +17,11 @@ an entry point.
 
 ## Todo before cargo release
 
-Add filters both for sitemap.xml paths and url paths passed out  
-Care about robots.txt exclusions  
-Think about how long-running spiders are going to reintegrate stale, already fetched or failed urls  
-Add conditional fetch based on HEAD hashes  
-Split off and generalize the segmented data structure for later use with the UrlEntry type  
+(a) Add filters both for sitemap.xml paths and url paths passed out (make a UrlFilter module)  
+(z) Care about robots.txt exclusions  
+(b) Think about how long-running spiders are going to reintegrate stale, already fetched or failed urls  
+(b) Add conditional fetch based on HEAD hashes  
+(c) Split off and generalize the segmented data structure for later use with the UrlEntry type  
+
+Hes: (z) (c)  
+Odi: (a) (b)  
