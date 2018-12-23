@@ -7,6 +7,7 @@ authors = ["Brady McDonough"]
 reqwest = "^0.9"
 url = "1.7.0"
 sitemap = "0.3.0"
+cuckoofilter = "0.3.2"
 
 [dependencies.rs_pider_robots]
 path="../rs-pider-robots/"

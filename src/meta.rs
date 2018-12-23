@@ -15,6 +15,8 @@ use url::Url;
 
 use reqwest::{Client, Response, Error as ReqwestError};
 
+use sectioned_list::SectionedList;
+
 /*
  * Internals
  */
@@ -189,6 +191,7 @@ impl SiteMeta {
 
     //TODO: .expect( ) is brittle
     //TODO: sitemap.xml CAN contain relative path URLs
+    //TODO: 
     fn next_in_map( &mut self ) -> Option< BaseUrl > {
 
         let ( mut curr_map, map_entry ) = self.curr_map.take( ).unwrap( );
