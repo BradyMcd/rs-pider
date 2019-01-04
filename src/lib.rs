@@ -4,6 +4,7 @@ extern crate url;
 extern crate reqwest;
 extern crate sitemap;
 extern crate base_url;
+extern crate chrono;
 
 pub use url::Url;
 pub use base_url::BaseUrl;

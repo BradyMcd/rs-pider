@@ -1,8 +1,4 @@
 //
-// :81 :83
-
-use std::collections::VecDeque;
-use std::iter::FromIterator;
 
 use rs_pider_robots::RobotsParser;
 
@@ -14,80 +10,11 @@ use sitemap::reader::{ SiteMapReader, SiteMapEntity };
 use url::Url;
 
 use reqwest::{Client, Response, Error as ReqwestError};
+use reqwest::header::{ ETAG, LAST_MODIFIED };
+use reqwest::Method;
 
+use std::hash::{ Hash, Hasher };
 use sectioned_list::SectionedList;
-
-/*
- * Internals
- */
-
-/// A concordantly filtered collection of SiteMap information with a fresh and stale pile
-struct MapsList {
-    new: VecDeque< SiteMapEntry >,
-    stale: VecDeque< SiteMapEntry >,
-}
-
-
-//TODO: Since this is two collections having a full new section and even one element in the stale section for example could make bad things happen.
-impl MapsList {
-
-    fn new(  ) -> MapsList {
-        MapsList{
-            new: VecDeque::new(),
-            stale: VecDeque::new(),
-        }
-    }
-
-    fn is_empty( &self ) -> bool {
-        self.new.is_empty( ) && self.stale.is_empty( )
-    }
-
-    fn is_stale( &self ) -> bool {
-        self.new.is_empty( ) && !self.stale.is_empty( )
-    }
-
-    fn push_new( &mut self, data: SiteMapEntry ) {
-        if !self.new.iter( ).any( | e |{ e.loc.get_url( ) == data. loc.get_url( ) } ) &&
-            !self.stale.iter( ).any( | e |{ e.loc.get_url( ) == data.loc.get_url( ) } ) {
-            self.new.push_back( data );
-        }
-    }
-
-    fn push_stale( &mut self, data: SiteMapEntry ) {
-        self.stale.push_back( data );
-    }
-
-    fn pop( &mut self ) -> Option< SiteMapEntry > {
-        self.new.pop_front( )
-    }
-
-    //TODO: Split this
-    fn len( &self ) -> usize {
-        self.new.len( )
-    }
-
-    fn merge_stale( &mut self ) {
-        self.new.append( &mut self.stale );
-    }
-
-    fn filter_merge_stale( &mut self, filter:&mut FnMut( &SiteMapEntry )->bool ) {
-        let ( n, s ): ( VecDeque< SiteMapEntry >, VecDeque< SiteMapEntry > ) =
-            self.stale.drain( .. ).partition( |entry|{ filter( entry ) } );
-
-        self.new.extend( n );
-        self.stale.extend( s );
-    }
-}
-impl< T: Into< SiteMapEntry > > FromIterator< T > for MapsList {
-    fn from_iter< I:IntoIterator< Item=T > >( iter:I ) -> Self {
-        let mut ret = MapsList::new( );
-
-        for item in iter {
-            ret.push_new( item.into( ) );
-        }
-        return ret;
-    }
-}
 
 fn guess_robots( url:&BaseUrl ) -> BaseUrl {
     let mut ret = url.clone( );
@@ -95,15 +22,133 @@ fn guess_robots( url:&BaseUrl ) -> BaseUrl {
     return ret;
 }
 
+enum ResID {
+    ETag( String ),
+    LastMod( String ),
+    Empty,
+}
+
+impl ResID {
+
+    fn from_response( res: &Response ) -> Self {
+        if res.status( ).is_success( ) {
+            match res.headers( ).get( ETAG ) {
+                Some( et ) => return ResID::ETag( et.to_str( ).unwrap( ).to_string( ) ),
+                _ => { /* DO NOTHING */ }
+            }
+            match res.headers( ).get( LAST_MODIFIED ) {
+                Some( s ) => {
+                    return ResID::LastMod( s.to_str( ).unwrap( ).to_string( ) )
+                }
+                _ => { /* DO NOTHING */ }
+            }
+        }
+
+        ResID::empty( )
+    }
+
+    fn empty( ) -> Self {
+        ResID::Empty
+    }
+
+    fn is_empty( &self ) -> bool {
+        match self {
+            ResID::Empty => true,
+            _ => false,
+        }
+    }
+
+    fn keytxt( &self ) -> &str {
+        assert!( !self.is_empty( ) );
+        match self {
+            ResID::LastMod( _ ) => "If-Modified-Since",
+            ResID::ETag( _ ) => "If-Match",
+            ResID::Empty => "",
+        }
+    }
+
+    fn valtxt( &self ) -> &str {
+        assert!( !self.is_empty( ) );
+        match self {
+            ResID::LastMod( s ) => s.as_str( ),
+            ResID::ETag( s ) => s.as_str( ),
+            _ => "",
+        }
+    }
+}
+
+struct KnownSitemap {
+    location: BaseUrl,
+    last_id: ResID,
+}
+
+impl From< BaseUrl > for KnownSitemap {
+
+    fn from( url: BaseUrl ) -> Self {
+        KnownSitemap{
+            location: url,
+            last_id: ResID::empty( ),
+        }
+    }
+}
+
+impl TryFrom< SiteMapEntry > for KnownSitemap {
+    type Err = ();
+    fn try_from( entry: SiteMapEntry ) -> Result< Self, Self::Err > {
+        let location = match entry.loc.get_url( ) {
+            Some( url ) => BaseUrl::from( url ), //PANIC! maybe.
+            None => return Err(( ))
+        };
+
+        Ok( KnownSitemap {
+            location: location,
+            last_id: ResID::empty( ),
+        } )
+    }
+}
+
+impl PartialEq for KnownSitemap {
+    fn eq( &self, rhs: &Self ) -> bool {
+        self.location == rhs.location
+    }
+}
+
+impl Hash for KnownSitemap {
+
+    fn hash< H: Hasher > ( &self, hasher: &mut H ) {
+        self.location.path( ).hash( hasher );
+    }
+}
+
+impl KnownSitemap {
+
+    fn fetch_map( &mut self, client: &Client ) -> Result< Response, ReqwestError > {
+        let response: Result< Response, ReqwestError >;
+        let fetch_url = Url::from( self.location.clone( ) );
+        let mut request = client.request( Method::GET, fetch_url );
+
+        if !self.last_id.is_empty( ) {
+            request = request.header( self.last_id.keytxt( ), self.last_id.valtxt( ) );
+        }
+
+        response = request.send( );
+        match &response {
+            Ok( res ) =>{
+                self.last_id = ResID::from_response( res );
+            }
+            Err( _ ) => { /*DO NOTHING*/ }
+        }
+        return response;
+    }
+}
+
 /*
  * Public
  */
-
 pub struct SiteMeta {
-    client: Client,
-    //I think I need two barriers in this Deque, one for retry failures and one for timing
-    known_maps: MapsList,
-    curr_map: Option< ( SiteMapReader< Response >, SiteMapEntry ) >,
+   client: Client,
+    known_maps: SectionedList< KnownSitemap >,
+    curr_map: Option< ( SiteMapReader< Response > ) >,
     robots: RobotsParser,
     base_url: BaseUrl,
 }
@@ -130,8 +175,8 @@ impl SiteMeta {
 
         if self.known_maps.is_empty( ) {
 
-            self.known_maps.push_new(
-                Url::from( guess_sitemap( &self.base_url ) ).into( )
+            self.known_maps.push_main (
+                guess_sitemap( &self.base_url ).into( )
             );
         // }else if self.known_maps.is_stale( ) {
 
@@ -147,26 +192,25 @@ impl SiteMeta {
     /// analyzed. On a successful data return a ```SiteMapReader``` is built out of the response text
     /// and stored in the ```curr_map``` slot. In the case of an error the map is pushed into the stale
     /// queue of ```known_maps``` and currently no further action is taken
-    //TODO: let response ... is ugly brittle. No error handling
     #[inline]
     fn fetch_next_map( &mut self ) -> bool {
-        let next_entry;
-        if { next_entry = self.known_maps.pop( ); next_entry.is_some( ) } {
-            let response = self.client.get::<Url>( next_entry.clone( ).unwrap( )
-                                                   .loc.get_url( ).unwrap( ) ).send( );
-            match response {
-                Ok( r ) => {
-                    self.curr_map = Some( (
-                        SiteMapReader::< Response >::new( r ),
-                        next_entry.unwrap( ) ) );
-                    return true;
-                }
-                Err( _e ) => {
-                    self.known_maps.push_stale( next_entry.unwrap( ) );
-                    //TODO: Here be dragons
+        {
+            let next_entry = self.known_maps.peek_main( );
+            if { next_entry.is_some( ) } {
+                let response = next_entry.unwrap( ).fetch_map( &self.client );
+
+                match response {
+                    Ok( r ) => {
+                        self.curr_map = Some( SiteMapReader::< Response >::new( r ) );
+                        return true;
+                    }
+                    Err( _e ) => {
+                        //TODO: Here be dragons
+                    }
                 }
             }
         }
+        self.known_maps.skip_main( );
         false
     }
 
@@ -183,7 +227,7 @@ impl SiteMeta {
             return false;
         } else {
             while !self.fetch_next_map( ) {
-                if self.known_maps.is_stale( ) { return false; }
+                if self.known_maps.is_alt( ) { return false; }
             }
         }
         true
@@ -194,7 +238,7 @@ impl SiteMeta {
     //TODO: 
     fn next_in_map( &mut self ) -> Option< BaseUrl > {
 
-        let ( mut curr_map, map_entry ) = self.curr_map.take( ).unwrap( );
+        let mut curr_map = self.curr_map.take( ).unwrap( );
         let mut w_entry = curr_map.next( );
 
         while w_entry.is_some( ) {
@@ -204,12 +248,10 @@ impl SiteMeta {
                 SiteMapEntity::Url( ue ) => {
                     match ue.loc {
                         Location::Url( u ) => {
-                            self.curr_map.get_or_insert( ( curr_map, map_entry ) );
+                            self.curr_map.get_or_insert( curr_map );
                             return Some( BaseUrl::try_from( u )
                                          .expect( "Sitemap contains an invalid url" ) );
                         }
-
-
                         _ => { /*Do Nothing*/ }
                     }
                 }
@@ -217,21 +259,18 @@ impl SiteMeta {
                 SiteMapEntity::SiteMap( se ) => {
                     match se.loc {
                         Location::Url( u ) => {
-                            self.known_maps.push_new(
-                                SiteMapEntry::from( BaseUrl::try_from( u )
-                                                    .expect( "Sitemap contains an invalid url" ) )
-                            );
+                            self.known_maps.push_main( BaseUrl::try_from( u ).expect(
+                                "Sitemap contains an invalid url" ).into( ) );
                         }
                         _ => { /*Do Nothing*/}
                     }
                 }
-
                 _ => { /*Do Nothing*/ }
             }
             w_entry = curr_map.next( );
         }
 
-        self.known_maps.push_stale( map_entry );
+        self.known_maps.skip_main();
         None
     }
 }
@@ -265,7 +304,7 @@ impl SiteMeta {
         let client = Client::new( ); //TODO: add client setup
         let response = client.get::< Url >( robots_url.clone( ).into( ) ).send( );
         let robots_txt;
-        let known_maps: MapsList;
+        let known_maps: SectionedList< KnownSitemap >;
         let mut host = robots_url.clone( );
         host.set_path( "/" );
 

@@ -20,8 +20,6 @@ an entry point.
 (a) Add filters both for sitemap.xml paths and url paths passed out (make a UrlFilter module)  
 (z) Care about robots.txt exclusions  
 (b) Think about how long-running spiders are going to reintegrate stale, already fetched or failed urls  
-(b) Add conditional fetch based on HEAD hashes  
-(c) Split off and generalize the segmented data structure for later use with the UrlEntry type  
 
-Hes: (z) (c)  
+Hes: (z)  
 Odi: (a) (b)  
